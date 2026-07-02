@@ -89,7 +89,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getFirestore, collection, addDoc, doc, updateDoc,
+  getFirestore, collection, addDoc, doc, updateDoc, deleteDoc,
   onSnapshot, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -134,6 +134,7 @@ let vehiculos = [];
 let cargando = true;
 let vista = "lote"; // 'lote' | 'historial' | 'nuevo'
 let confirmarSalidaId = null;
+let confirmarEliminarId = null;
 let mensajeToast = "";
 let toastTimer = null;
 
@@ -179,7 +180,7 @@ async function registrarEntrada() {
   if (!propietario) return mostrarError("Falta el nombre de la persona que deja el vehículo.");
   if (!marcaFinal) return mostrarError("Falta la marca del vehículo.");
   if (!modelo) return mostrarError("Falta el modelo del vehículo.");
-  if (!/^\d{4}$/.test(vin4)) return mostrarError("Los últimos 4 dígitos del VIN deben ser 4 números.");
+  if (!/^\d{6}$/.test(vin4)) return mostrarError("Los últimos 6 dígitos del VIN deben ser 6 números.");
   if (!/^\d{4}$/.test(anio) || Number(anio) < 1950 || Number(anio) > 2100) return mostrarError("El año no es válido.");
 
   errBox.style.display = "none";
@@ -220,6 +221,17 @@ async function confirmarYRegistrarSalida(id) {
   }
 }
 
+async function eliminarVehiculo(id) {
+  try {
+    await deleteDoc(doc(db, "vehiculos", id));
+    confirmarEliminarId = null;
+    render();
+    mostrarMensaje("Registro eliminado");
+  } catch (e) {
+    mostrarMensaje("No se pudo eliminar. Intenta de nuevo.");
+  }
+}
+
 // ---------------- render ----------------
 function render() {
   const enLote = vehiculos.filter((v) => !v.salida);
@@ -239,6 +251,7 @@ function render() {
     </div>
     <div id="toast-holder">${mensajeToast ? `<div class="toast">${mensajeToast}</div>` : ""}</div>
     ${confirmarSalidaId ? renderModal() : ""}
+    ${confirmarEliminarId ? renderModalEliminar() : ""}
   `;
   attachHandlers();
 }
@@ -276,6 +289,7 @@ function renderHistorial(historial) {
       <div class="card-line">Fecha de entrada: ${formatoFecha(v.entrada)}</div>
       <div class="card-line">Fecha de salida: ${formatoFecha(v.salida)}</div>
       <div class="card-line" style="font-weight:800; font-size:16px; margin-top:6px;">Total cobrado: $${v.montoCobrado}</div>
+      <button class="exit-btn" data-action="pedir-eliminar" data-id="${v.id}">Eliminar registro</button>
     </div>
   `).join("");
 }
@@ -301,8 +315,8 @@ function renderNuevo() {
     <label class="field-label">Año del vehículo</label>
     <input class="field" id="f-anio" placeholder="Ej. 2021" inputmode="numeric" maxlength="4" />
 
-    <label class="field-label">Últimos 4 dígitos del VIN</label>
-    <input class="field" id="f-vin4" placeholder="Ej. 4821" inputmode="numeric" maxlength="4" />
+    <label class="field-label">Últimos 6 dígitos del VIN</label>
+    <input class="field" id="f-vin4" placeholder="Ej. 482195" inputmode="numeric" maxlength="6" />
 
     <div class="error-box" id="form-error"></div>
 
@@ -333,11 +347,30 @@ function renderModal() {
   `;
 }
 
+function renderModalEliminar() {
+  const v = vehiculos.find((x) => x.id === confirmarEliminarId);
+  if (!v) return "";
+  return `
+    <div class="modal-overlay" data-action="cerrar-modal-eliminar-fondo">
+      <div class="modal-box" data-stop="1">
+        <div style="font-size:19px; font-weight:800; margin-bottom:8px;">¿Eliminar este registro?</div>
+        <div style="font-size:16px; color:#333;">${v.marca} ${v.modelo} ${v.anio} — VIN ${v.vin4}</div>
+        <div style="font-size:16px; color:#333; margin-top:4px;">Dueño: ${v.propietario}</div>
+        <div style="font-size:15px; color:#666; margin-top:12px;">Esta acción no se puede deshacer.</div>
+        <div class="modal-btn-row">
+          <button class="modal-btn-cancel" data-action="cancelar-eliminar">Cancelar</button>
+          <button class="modal-btn-confirm" data-action="confirmar-eliminar" data-id="${v.id}">Sí, eliminar</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function attachHandlers() {
   appEl.querySelectorAll("[data-action]").forEach((el) => {
     el.addEventListener("click", (e) => {
       const accion = el.getAttribute("data-action");
-      if (accion === "cerrar-modal-fondo" && e.target !== el) return; // click dentro de la caja, no cerrar
+      if ((accion === "cerrar-modal-fondo" || accion === "cerrar-modal-eliminar-fondo") && e.target !== el) return; // click dentro de la caja, no cerrar
       if (accion === "ir-lote") { vista = "lote"; render(); }
       else if (accion === "ir-historial") { vista = "historial"; render(); }
       else if (accion === "ir-nuevo") { vista = "nuevo"; render(); }
@@ -346,6 +379,9 @@ function attachHandlers() {
       else if (accion === "pedir-salida") { confirmarSalidaId = el.getAttribute("data-id"); render(); }
       else if (accion === "cancelar-salida" || accion === "cerrar-modal-fondo") { confirmarSalidaId = null; render(); }
       else if (accion === "confirmar-salida") confirmarYRegistrarSalida(el.getAttribute("data-id"));
+      else if (accion === "pedir-eliminar") { confirmarEliminarId = el.getAttribute("data-id"); render(); }
+      else if (accion === "cancelar-eliminar" || accion === "cerrar-modal-eliminar-fondo") { confirmarEliminarId = null; render(); }
+      else if (accion === "confirmar-eliminar") eliminarVehiculo(el.getAttribute("data-id"));
     });
   });
 
@@ -356,11 +392,13 @@ function attachHandlers() {
       otra.style.display = marcaSel.value === "Otra" ? "block" : "none";
     });
   }
-  ["f-anio", "f-vin4"].forEach((id) => {
-    const input = document.getElementById(id);
-    if (input) input.addEventListener("input", () => {
-      input.value = input.value.replace(/\D/g, "").slice(0, 4);
-    });
+  const anioInput = document.getElementById("f-anio");
+  if (anioInput) anioInput.addEventListener("input", () => {
+    anioInput.value = anioInput.value.replace(/\D/g, "").slice(0, 4);
+  });
+  const vinInput = document.getElementById("f-vin4");
+  if (vinInput) vinInput.addEventListener("input", () => {
+    vinInput.value = vinInput.value.replace(/\D/g, "").slice(0, 6);
   });
 }
 
