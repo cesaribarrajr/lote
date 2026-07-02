@@ -107,7 +107,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const vehiculosCol = collection(db, "vehiculos");
 
-const TARIFA_MENSUAL = 25;
+const TARIFA_DIARIA = 2; // dólares por día
 const MARCAS_COMUNES = [
   "Toyota", "Honda", "Ford", "Chevrolet", "Nissan", "Jeep",
   "Ram", "GMC", "Hyundai", "Kia", "Volkswagen", "Mazda",
@@ -120,13 +120,15 @@ function formatoHora(iso) {
 function formatoFecha(iso) {
   return new Date(iso).toLocaleDateString("es-MX", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
+// Se cobra $2 por cada día (o fracción de día) que el vehículo
+// permanece en el lote. Cualquier día empezado se cobra completo,
+// mínimo 1 día.
 function calcularCobro(entradaIso, salidaIso) {
   const entrada = new Date(entradaIso);
   const salida = new Date(salidaIso);
   const msPorDia = 1000 * 60 * 60 * 24;
-  const dias = Math.max(0, Math.ceil((salida - entrada) / msPorDia));
-  const meses = Math.max(1, Math.ceil(dias / 30));
-  return { dias, meses, total: meses * TARIFA_MENSUAL };
+  const dias = Math.max(1, Math.ceil((salida - entrada) / msPorDia));
+  return { dias, total: dias * TARIFA_DIARIA };
 }
 
 // ---------------- estado ----------------
@@ -271,7 +273,7 @@ function renderLote(enLote) {
         <div class="card-line">Dueño: ${v.propietario}</div>
         <div class="card-line">VIN termina en: ${v.vin4}</div>
         <div class="card-line">Fecha de entrada: ${formatoFecha(v.entrada)} (${formatoHora(v.entrada)})</div>
-        <div class="card-line card-charge">Lleva ${est.meses} ${est.meses === 1 ? "mes" : "meses"} — debe $${est.total} hasta hoy</div>
+        <div class="card-line card-charge">Lleva ${est.dias} ${est.dias === 1 ? "día" : "días"} — debe $${est.total} hasta hoy</div>
         <button class="exit-btn" data-action="pedir-salida" data-id="${v.id}">Registrar salida</button>
       </div>
     `;
@@ -327,7 +329,7 @@ function renderNuevo() {
 function renderModal() {
   const v = vehiculos.find((x) => x.id === confirmarSalidaId);
   if (!v) return "";
-  const { dias, meses, total } = calcularCobro(v.entrada, new Date().toISOString());
+  const { dias, total } = calcularCobro(v.entrada, new Date().toISOString());
   return `
     <div class="modal-overlay" data-action="cerrar-modal-fondo">
       <div class="modal-box" data-stop="1">
@@ -335,7 +337,7 @@ function renderModal() {
         <div style="font-size:16px; color:#333;">${v.marca} ${v.modelo} ${v.anio} — VIN ${v.vin4}</div>
         <div style="font-size:16px; color:#333; margin-top:4px;">Dueño: ${v.propietario}</div>
         <div style="font-size:18px; font-weight:800; margin-top:12px;">
-          ${dias} ${dias === 1 ? "día" : "días"} en el lote (${meses} ${meses === 1 ? "mes" : "meses"})<br/>
+          ${dias} ${dias === 1 ? "día" : "días"} en el lote<br/>
           Total a cobrar: $${total} dólares
         </div>
         <div class="modal-btn-row">
