@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>Control de Lote</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #ffffff;
+    color: #0a0a0a;
+  }
+  #app {
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .header {
+    background: #0a0a0a;
+    color: #ffffff;
+    padding: 22px 20px 0;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+  .header h1 { font-size: 26px; font-weight: 800; margin: 0; letter-spacing: .3px; }
+  .header .sub { font-size: 14px; opacity: .75; margin: 4px 0 14px; }
+  .tabs { display: flex; gap: 8px; }
+  .tab-btn {
+    flex: 1; padding: 12px 8px; border: none; cursor: pointer;
+    border-radius: 10px 10px 0 0; font-size: 16px; font-weight: 700;
+    background: #232323; color: #fff;
+  }
+  .tab-btn.active { background: #fff; color: #0a0a0a; }
+  .body { flex: 1; padding: 16px; padding-bottom: 100px; }
+  .big-btn {
+    width: 100%; padding: 20px 16px; font-size: 19px; font-weight: 800;
+    background: #0a0a0a; color: #fff; border: 2px solid #0a0a0a;
+    border-radius: 14px; cursor: pointer; margin-bottom: 14px;
+  }
+  .card {
+    border: 2px solid #0a0a0a; border-radius: 14px; padding: 16px 18px;
+    margin-bottom: 14px; background: #fff;
+  }
+  .card-title { font-size: 20px; font-weight: 800; margin-bottom: 4px; }
+  .card-line { font-size: 15px; color: #333; margin-bottom: 2px; }
+  .card-charge { font-weight: 700; margin-top: 6px; }
+  .exit-btn {
+    margin-top: 12px; width: 100%; padding: 14px 10px; font-size: 17px;
+    font-weight: 700; background: #fff; color: #0a0a0a; border: 2px solid #0a0a0a;
+    border-radius: 10px; cursor: pointer;
+  }
+  label.field-label { font-size: 15px; font-weight: 700; margin-top: 16px; margin-bottom: 6px; display: block; }
+  input.field, select.field {
+    width: 100%; font-size: 18px; padding: 14px 12px; border: 2px solid #0a0a0a;
+    border-radius: 10px; background: #fff; color: #0a0a0a; font-family: inherit;
+  }
+  .empty { text-align: center; color: #666; font-size: 16px; margin-top: 60px; line-height: 1.5; }
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: #0a0a0a; color: #fff; padding: 14px 22px; border-radius: 30px;
+    font-size: 15px; font-weight: 700; max-width: 90%; z-index: 20;
+    box-shadow: 0 6px 20px rgba(0,0,0,.3);
+  }
+  .error-box {
+    background: #fff; border: 2px solid #0a0a0a; color: #0a0a0a; padding: 12px 14px;
+    border-radius: 10px; font-size: 15px; font-weight: 700; margin-top: 14px; display: none;
+  }
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex;
+    align-items: center; justify-content: center; z-index: 30; padding: 20px;
+  }
+  .modal-box { background: #fff; border-radius: 16px; padding: 24px; max-width: 380px; width: 100%; border: 2px solid #0a0a0a; }
+  .modal-btn-row { display: flex; gap: 10px; margin-top: 20px; }
+  .modal-btn-cancel, .modal-btn-confirm {
+    flex: 1; padding: 14px 10px; font-size: 16px; font-weight: 700; border-radius: 10px; cursor: pointer;
+  }
+  .modal-btn-cancel { background: #fff; color: #0a0a0a; border: 2px solid #0a0a0a; }
+  .modal-btn-confirm { background: #0a0a0a; color: #fff; border: 2px solid #0a0a0a; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getFirestore, collection, addDoc, doc, updateDoc,
+  onSnapshot, query, orderBy
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// --- Configuración de Firebase (proyecto: base-de-datos-lote) ---
+const firebaseConfig = {
+  apiKey: "AIzaSyBgNT83DtbQqAOiiu899HQ3-CAiXOFR8ug",
+  authDomain: "base-de-datos-lote.firebaseapp.com",
+  projectId: "base-de-datos-lote",
+  storageBucket: "base-de-datos-lote.firebasestorage.app",
+  messagingSenderId: "234889537858",
+  appId: "1:234889537858:web:3eb2679737581c9eb900db",
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const vehiculosCol = collection(db, "vehiculos");
+
+const TARIFA_MENSUAL = 25;
+const MARCAS_COMUNES = [
+  "Toyota", "Honda", "Ford", "Chevrolet", "Nissan", "Jeep",
+  "Ram", "GMC", "Hyundai", "Kia", "Volkswagen", "Mazda",
+  "Dodge", "BMW", "Mercedes-Benz", "Subaru", "Otra",
+];
+
+function formatoHora(iso) {
+  return new Date(iso).toLocaleString("es-MX", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+function formatoFecha(iso) {
+  return new Date(iso).toLocaleDateString("es-MX", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+function calcularCobro(entradaIso, salidaIso) {
+  const entrada = new Date(entradaIso);
+  const salida = new Date(salidaIso);
+  const msPorDia = 1000 * 60 * 60 * 24;
+  const dias = Math.max(0, Math.ceil((salida - entrada) / msPorDia));
+  const meses = Math.max(1, Math.ceil(dias / 30));
+  return { dias, meses, total: meses * TARIFA_MENSUAL };
+}
+
+// ---------------- estado ----------------
+let vehiculos = [];
+let cargando = true;
+let vista = "lote"; // 'lote' | 'historial' | 'nuevo'
+let confirmarSalidaId = null;
+let mensajeToast = "";
+let toastTimer = null;
+
+const appEl = document.getElementById("app");
+
+function mostrarMensaje(texto) {
+  mensajeToast = texto;
+  renderToastOnly();
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { mensajeToast = ""; renderToastOnly(); }, 2500);
+}
+
+function renderToastOnly() {
+  const el = document.getElementById("toast-holder");
+  if (el) el.innerHTML = mensajeToast ? `<div class="toast">${mensajeToast}</div>` : "";
+}
+
+// Escucha en tiempo real. Mientras la persona está llenando el
+// formulario de "nueva entrada" no volvemos a dibujar todo, para
+// no borrarle lo que ya escribió.
+onSnapshot(query(vehiculosCol, orderBy("entrada", "desc")), (snapshot) => {
+  vehiculos = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+  cargando = false;
+  if (vista !== "nuevo") render();
+}, (err) => {
+  console.error(err);
+  cargando = false;
+  mostrarMensaje("No se pudo conectar con la base de datos.");
+});
+
+async function registrarEntrada() {
+  const propietario = document.getElementById("f-propietario").value.trim();
+  const marcaSel = document.getElementById("f-marca").value;
+  const marcaOtra = document.getElementById("f-marca-otra").value.trim();
+  const modelo = document.getElementById("f-modelo").value.trim();
+  const anio = document.getElementById("f-anio").value.trim();
+  const vin4 = document.getElementById("f-vin4").value.trim();
+  const errBox = document.getElementById("form-error");
+
+  const marcaFinal = marcaSel === "Otra" ? marcaOtra : marcaSel;
+  const mostrarError = (msg) => { errBox.textContent = msg; errBox.style.display = "block"; };
+
+  if (!propietario) return mostrarError("Falta el nombre de la persona que deja el vehículo.");
+  if (!marcaFinal) return mostrarError("Falta la marca del vehículo.");
+  if (!modelo) return mostrarError("Falta el modelo del vehículo.");
+  if (!/^\d{4}$/.test(vin4)) return mostrarError("Los últimos 4 dígitos del VIN deben ser 4 números.");
+  if (!/^\d{4}$/.test(anio) || Number(anio) < 1950 || Number(anio) > 2100) return mostrarError("El año no es válido.");
+
+  errBox.style.display = "none";
+
+  const boton = document.getElementById("btn-guardar-entrada");
+  boton.disabled = true;
+  boton.textContent = "Guardando...";
+
+  try {
+    await addDoc(vehiculosCol, {
+      propietario, marca: marcaFinal, modelo, vin4, anio,
+      entrada: new Date().toISOString(),
+      salida: null,
+      montoCobrado: null,
+    });
+    vista = "lote";
+    render();
+    mostrarMensaje("Entrada registrada");
+  } catch (e) {
+    mostrarError("No se pudo guardar. Revisa tu conexión e intenta de nuevo.");
+    boton.disabled = false;
+    boton.textContent = "Guardar entrada";
+  }
+}
+
+async function confirmarYRegistrarSalida(id) {
+  const v = vehiculos.find((x) => x.id === id);
+  if (!v) return;
+  const ahora = new Date().toISOString();
+  const { total } = calcularCobro(v.entrada, ahora);
+  try {
+    await updateDoc(doc(db, "vehiculos", id), { salida: ahora, montoCobrado: total });
+    confirmarSalidaId = null;
+    render();
+    mostrarMensaje(`Salida registrada — se debe $${total} dólares`);
+  } catch (e) {
+    mostrarMensaje("No se pudo registrar la salida. Intenta de nuevo.");
+  }
+}
+
+// ---------------- render ----------------
+function render() {
+  const enLote = vehiculos.filter((v) => !v.salida);
+  const historial = vehiculos.filter((v) => v.salida).sort((a, b) => new Date(b.salida) - new Date(a.salida));
+
+  appEl.innerHTML = `
+    <div class="header">
+      <h1>Control de Lote</h1>
+      <div class="sub">${enLote.length} ${enLote.length === 1 ? "vehículo" : "vehículos"} en el lote ahora</div>
+      <div class="tabs">
+        <button class="tab-btn ${vista === "lote" ? "active" : ""}" data-action="ir-lote">En el lote</button>
+        <button class="tab-btn ${vista === "historial" ? "active" : ""}" data-action="ir-historial">Historial</button>
+      </div>
+    </div>
+    <div class="body">
+      ${cargando ? `<div class="empty">Cargando...</div>` : vista === "nuevo" ? renderNuevo() : vista === "lote" ? renderLote(enLote) : renderHistorial(historial)}
+    </div>
+    <div id="toast-holder">${mensajeToast ? `<div class="toast">${mensajeToast}</div>` : ""}</div>
+    ${confirmarSalidaId ? renderModal() : ""}
+  `;
+  attachHandlers();
+}
+
+function renderLote(enLote) {
+  if (enLote.length === 0) {
+    return `
+      <button class="big-btn" data-action="ir-nuevo">+ Registrar entrada</button>
+      <div class="empty">No hay vehículos en el lote.<br/>Toca "Registrar entrada" para agregar uno.</div>
+    `;
+  }
+  const tarjetas = enLote.map((v) => {
+    const est = calcularCobro(v.entrada, new Date().toISOString());
+    return `
+      <div class="card">
+        <div class="card-title">${v.marca} ${v.modelo} ${v.anio}</div>
+        <div class="card-line">Dueño: ${v.propietario}</div>
+        <div class="card-line">VIN termina en: ${v.vin4}</div>
+        <div class="card-line">Fecha de entrada: ${formatoFecha(v.entrada)} (${formatoHora(v.entrada)})</div>
+        <div class="card-line card-charge">Lleva ${est.meses} ${est.meses === 1 ? "mes" : "meses"} — debe $${est.total} hasta hoy</div>
+        <button class="exit-btn" data-action="pedir-salida" data-id="${v.id}">Registrar salida</button>
+      </div>
+    `;
+  }).join("");
+  return `<button class="big-btn" data-action="ir-nuevo">+ Registrar entrada</button>${tarjetas}`;
+}
+
+function renderHistorial(historial) {
+  if (historial.length === 0) return `<div class="empty">Todavía no hay salidas registradas.</div>`;
+  return historial.map((v) => `
+    <div class="card">
+      <div class="card-title">${v.marca} ${v.modelo} ${v.anio}</div>
+      <div class="card-line">Dueño: ${v.propietario}</div>
+      <div class="card-line">VIN termina en: ${v.vin4}</div>
+      <div class="card-line">Fecha de entrada: ${formatoFecha(v.entrada)}</div>
+      <div class="card-line">Fecha de salida: ${formatoFecha(v.salida)}</div>
+      <div class="card-line" style="font-weight:800; font-size:16px; margin-top:6px;">Total cobrado: $${v.montoCobrado}</div>
+    </div>
+  `).join("");
+}
+
+function renderNuevo() {
+  const opciones = MARCAS_COMUNES.map((m) => `<option value="${m}">${m}</option>`).join("");
+  return `
+    <button class="exit-btn" style="margin-bottom:10px;" data-action="cancelar-nuevo">← Cancelar</button>
+
+    <label class="field-label">Nombre de la persona que deja el vehículo</label>
+    <input class="field" id="f-propietario" placeholder="Ej. Juan Pérez" />
+
+    <label class="field-label">Marca del vehículo</label>
+    <select class="field" id="f-marca">
+      <option value="">Selecciona una marca</option>
+      ${opciones}
+    </select>
+    <input class="field" id="f-marca-otra" placeholder="Escribe la marca" style="margin-top:10px; display:none;" />
+
+    <label class="field-label">Modelo del vehículo</label>
+    <input class="field" id="f-modelo" placeholder="Ej. Corolla, Civic, F-150" />
+
+    <label class="field-label">Año del vehículo</label>
+    <input class="field" id="f-anio" placeholder="Ej. 2021" inputmode="numeric" maxlength="4" />
+
+    <label class="field-label">Últimos 4 dígitos del VIN</label>
+    <input class="field" id="f-vin4" placeholder="Ej. 4821" inputmode="numeric" maxlength="4" />
+
+    <div class="error-box" id="form-error"></div>
+
+    <button class="big-btn" id="btn-guardar-entrada" style="margin-top:22px;" data-action="guardar-entrada">Guardar entrada</button>
+  `;
+}
+
+function renderModal() {
+  const v = vehiculos.find((x) => x.id === confirmarSalidaId);
+  if (!v) return "";
+  const { dias, meses, total } = calcularCobro(v.entrada, new Date().toISOString());
+  return `
+    <div class="modal-overlay" data-action="cerrar-modal-fondo">
+      <div class="modal-box" data-stop="1">
+        <div style="font-size:19px; font-weight:800; margin-bottom:8px;">¿Confirmar salida?</div>
+        <div style="font-size:16px; color:#333;">${v.marca} ${v.modelo} ${v.anio} — VIN ${v.vin4}</div>
+        <div style="font-size:16px; color:#333; margin-top:4px;">Dueño: ${v.propietario}</div>
+        <div style="font-size:18px; font-weight:800; margin-top:12px;">
+          ${dias} ${dias === 1 ? "día" : "días"} en el lote (${meses} ${meses === 1 ? "mes" : "meses"})<br/>
+          Total a cobrar: $${total} dólares
+        </div>
+        <div class="modal-btn-row">
+          <button class="modal-btn-cancel" data-action="cancelar-salida">Cancelar</button>
+          <button class="modal-btn-confirm" data-action="confirmar-salida" data-id="${v.id}">Sí, salió</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function attachHandlers() {
+  appEl.querySelectorAll("[data-action]").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      const accion = el.getAttribute("data-action");
+      if (accion === "cerrar-modal-fondo" && e.target !== el) return; // click dentro de la caja, no cerrar
+      if (accion === "ir-lote") { vista = "lote"; render(); }
+      else if (accion === "ir-historial") { vista = "historial"; render(); }
+      else if (accion === "ir-nuevo") { vista = "nuevo"; render(); }
+      else if (accion === "cancelar-nuevo") { vista = "lote"; render(); }
+      else if (accion === "guardar-entrada") registrarEntrada();
+      else if (accion === "pedir-salida") { confirmarSalidaId = el.getAttribute("data-id"); render(); }
+      else if (accion === "cancelar-salida" || accion === "cerrar-modal-fondo") { confirmarSalidaId = null; render(); }
+      else if (accion === "confirmar-salida") confirmarYRegistrarSalida(el.getAttribute("data-id"));
+    });
+  });
+
+  const marcaSel = document.getElementById("f-marca");
+  if (marcaSel) {
+    marcaSel.addEventListener("change", () => {
+      const otra = document.getElementById("f-marca-otra");
+      otra.style.display = marcaSel.value === "Otra" ? "block" : "none";
+    });
+  }
+  ["f-anio", "f-vin4"].forEach((id) => {
+    const input = document.getElementById(id);
+    if (input) input.addEventListener("input", () => {
+      input.value = input.value.replace(/\D/g, "").slice(0, 4);
+    });
+  });
+}
+
+render();
+</script>
+</body>
+</html>
