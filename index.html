@@ -131,12 +131,41 @@ function calcularCobro(entradaIso, salidaIso) {
   return { dias, total: dias * TARIFA_DIARIA };
 }
 
+// Comprime la imagen en el navegador antes de guardarla (para no
+// pasarnos del límite de tamaño de Firestore). Reduce el ancho
+// máximo y la calidad JPEG.
+function comprimirImagen(file, maxAncho = 640, calidad = 0.6) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > maxAncho) {
+          h = Math.round(h * (maxAncho / w));
+          w = maxAncho;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", calidad));
+      };
+      img.onerror = () => reject(new Error("No se pudo leer la imagen"));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo"));
+    reader.readAsDataURL(file);
+  });
+}
+
 // ---------------- estado ----------------
 let vehiculos = [];
 let cargando = true;
 let vista = "lote"; // 'lote' | 'historial' | 'nuevo'
 let confirmarSalidaId = null;
 let confirmarEliminarId = null;
+let fotoDataUrl = null;
 let mensajeToast = "";
 let toastTimer = null;
 
@@ -194,10 +223,12 @@ async function registrarEntrada() {
   try {
     await addDoc(vehiculosCol, {
       propietario, marca: marcaFinal, modelo, vin4, anio,
+      foto: fotoDataUrl || null,
       entrada: new Date().toISOString(),
       salida: null,
       montoCobrado: null,
     });
+    fotoDataUrl = null;
     vista = "lote";
     render();
     mostrarMensaje("Entrada registrada");
@@ -269,6 +300,7 @@ function renderLote(enLote) {
     const est = calcularCobro(v.entrada, new Date().toISOString());
     return `
       <div class="card">
+        ${v.foto ? `<img src="${v.foto}" style="width:100%; border-radius:10px; margin-bottom:10px; display:block;" />` : ""}
         <div class="card-title">${v.marca} ${v.modelo} ${v.anio}</div>
         <div class="card-line">Dueño: ${v.propietario}</div>
         <div class="card-line">VIN termina en: ${v.vin4}</div>
@@ -285,6 +317,7 @@ function renderHistorial(historial) {
   if (historial.length === 0) return `<div class="empty">Todavía no hay salidas registradas.</div>`;
   return historial.map((v) => `
     <div class="card">
+      ${v.foto ? `<img src="${v.foto}" style="width:100%; border-radius:10px; margin-bottom:10px; display:block;" />` : ""}
       <div class="card-title">${v.marca} ${v.modelo} ${v.anio}</div>
       <div class="card-line">Dueño: ${v.propietario}</div>
       <div class="card-line">VIN termina en: ${v.vin4}</div>
@@ -319,6 +352,10 @@ function renderNuevo() {
 
     <label class="field-label">Últimos 6 dígitos del VIN</label>
     <input class="field" id="f-vin4" placeholder="Ej. 482195" inputmode="numeric" maxlength="6" />
+
+    <label class="field-label">Foto del vehículo (opcional)</label>
+    <input class="field" type="file" accept="image/*" capture="environment" id="f-foto" style="padding:10px;" />
+    <div id="foto-preview" style="margin-top:10px;"></div>
 
     <div class="error-box" id="form-error"></div>
 
@@ -375,8 +412,8 @@ function attachHandlers() {
       if ((accion === "cerrar-modal-fondo" || accion === "cerrar-modal-eliminar-fondo") && e.target !== el) return; // click dentro de la caja, no cerrar
       if (accion === "ir-lote") { vista = "lote"; render(); }
       else if (accion === "ir-historial") { vista = "historial"; render(); }
-      else if (accion === "ir-nuevo") { vista = "nuevo"; render(); }
-      else if (accion === "cancelar-nuevo") { vista = "lote"; render(); }
+      else if (accion === "ir-nuevo") { fotoDataUrl = null; vista = "nuevo"; render(); }
+      else if (accion === "cancelar-nuevo") { fotoDataUrl = null; vista = "lote"; render(); }
       else if (accion === "guardar-entrada") registrarEntrada();
       else if (accion === "pedir-salida") { confirmarSalidaId = el.getAttribute("data-id"); render(); }
       else if (accion === "cancelar-salida" || accion === "cerrar-modal-fondo") { confirmarSalidaId = null; render(); }
@@ -402,6 +439,22 @@ function attachHandlers() {
   if (vinInput) vinInput.addEventListener("input", () => {
     vinInput.value = vinInput.value.replace(/\D/g, "").slice(0, 6);
   });
+  const fotoInput = document.getElementById("f-foto");
+  if (fotoInput) {
+    fotoInput.addEventListener("change", async () => {
+      const preview = document.getElementById("foto-preview");
+      const file = fotoInput.files[0];
+      if (!file) { fotoDataUrl = null; preview.innerHTML = ""; return; }
+      preview.innerHTML = `<div style="font-size:14px; color:#666;">Procesando foto...</div>`;
+      try {
+        fotoDataUrl = await comprimirImagen(file);
+        preview.innerHTML = `<img src="${fotoDataUrl}" style="width:100%; border-radius:10px; border:2px solid #0a0a0a; display:block;" />`;
+      } catch (e) {
+        fotoDataUrl = null;
+        preview.innerHTML = `<div style="font-size:14px; color:#666;">No se pudo cargar la foto, pero puedes guardar sin ella.</div>`;
+      }
+    });
+  }
 }
 
 render();
